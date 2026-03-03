@@ -34,8 +34,7 @@ export class Slikr {
     }
     constructor(url: string) {
         this.#url = url;
-        this.#bindings = new Bindings(!WebTransport ? "s" : "t");
-        this.#ka()
+        this.#bindings = new Bindings(typeof WebTransport === "undefined" ? "s" : "t");
     }
     async #connect(retrylabel?: string) {
         console.log(`[Slikr] Connecting to ${this.#url}...${retrylabel ? `[${retrylabel}]` : ""}`);
@@ -52,7 +51,7 @@ export class Slikr {
         retryNum?: number,
         totalTimeout?: number
     } = {};
-    onRetryTimeout(fn: (retryNum?: number) => any):Slikr {
+    onRetryTimeout(fn: (retryNum?: number) => any): Slikr {
         this.#connectPredefData.onRetryTimeout = fn;
         return this;
     }
@@ -97,13 +96,15 @@ export class Slikr {
         let currentDelay = options?.retry?.delay?.number ?? this.#connectPredefData?.retryDelay ?? 1000;
         const totalTimeoutTime = options?.timeout?.time ?? this.#connectPredefData?.totalTimeout;
         let isTotalTimeout = false;
+        let hasCompleted = false;
         const totalTimeoutPromise = totalTimeoutTime
-            ? new Promise((_, reject) => setTimeout(() => {
+            ? new Promise((_, reject) => {setTimeout(() => {
                 isTotalTimeout = true;
                 if (options?.timeout?.onTimeout) options.timeout.onTimeout();
                 else if (this.#connectPredefData?.onTotalTimeout) this.#connectPredefData.onTotalTimeout();
                 reject(new Slikr.Error("Total Connection Timeout"));
-            }, totalTimeoutTime))
+            }, totalTimeoutTime)
+        })
             : null;
 
         const attemptConnection = async () => {
@@ -116,7 +117,7 @@ export class Slikr {
                         this.#connect(i > 0 ? `Retry ${i}` : ""),
                         new Promise((_, reject) => setTimeout(() => reject("retry_timeout"), retryTimeoutTime))
                     ]);
-
+                    this.#ka()                    
                     return this;
                 } catch (e) {
                     if (isTotalTimeout) throw e;
@@ -159,8 +160,9 @@ export class Slikr {
     }
     listen = this.on
     async send(name: string, data: any) {
-        const payload = typeof data === "object" ? JSON.stringify(data) : String(data);
-        await this.#bindings.send(name, payload);
+const payload = JSON.stringify(data, (_, value) => 
+        typeof value === 'bigint' ? value.toString() + 'n' : value
+    );        await this.#bindings.send(name, payload);
         return this
     }
 
@@ -175,6 +177,17 @@ export class Slikr {
             url: this.#url,
             type: this.#bindings.isWebSocket ? "WebSocket" : "WebTransport",
         };
+    }
+    async receive(name: string, timeout: number = 0) {
+        if (timeout > 0) {
+            return Promise.race([
+                this.#bindings.receive(name),
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Slikr.Error(`Receive timeout for: ${name}`)), timeout)
+                )
+            ]);
+        }
+        return await this.#bindings.receive(name);
     }
 }
 export default function slikr(url: string) {

@@ -7,7 +7,7 @@ export class Bindings {
     #type: "s" | "t";
     #c?: WebSocket | WebTransport;
     #u?: string;
-    #rclisteners: [] = []
+    #rclisteners: { [key: string]: SlikrEvListener[] } = {}
     get url() {
         return this.#u || ""
     }
@@ -40,6 +40,15 @@ export class Bindings {
     constructor(type: "s" | "t") {
         this.#type = type;
     }
+    receive(name: string): Promise<any> {
+        return new Promise((resolve) => {
+            if (!this.#rclisteners[name]) this.#rclisteners[name] = [];
+            this.#rclisteners[name].push({
+                name,
+                fn: (payload: any) => resolve(payload)
+            });
+        });
+    }
     get SocketCtor() {
         return this.#type === "s" ? WebSocket : WebTransport;
     }
@@ -57,8 +66,8 @@ export class Bindings {
     listen(name: string, callback: Function) {
         this.#listener.add(name, callback);
     }
-    listenAny(callback:Function){
-        this.#listener.add("any",callback)
+    listenAny(callback: Function) {
+        this.#listener.add("any", callback)
     }
     get isWebSocket() {
         return this.#type === "s";
@@ -110,20 +119,37 @@ export class Bindings {
         }
     }
     #setupEventHandling(c: WebSocket | WebTransport) {
-        const handleRaw = (raw: string) => {
-            const packet = ___data.get(raw);
-            if (!packet) return;
-            this.#listener.any_listeners.forEach(fn => fn(packet.name, packet.payload, packet));
-            const specifics = this.#listener.named_listeners[packet.name];
-            if (specifics) specifics.forEach(l => l.fn(packet.payload, packet));
-        };
+    const emit = (event: string, ...args: any[]) => {
+        const listeners = this.#listener.named_listeners[event];
+        if (listeners) listeners.forEach(l => l.fn(...args));
+    };
 
-        if (this.isWebSocket) {
-            (c as WebSocket).onmessage = (e) => handleRaw(e.data);
-        } else {
-            this.#wt.readDatagram(c as WebTransport, handleRaw);
-        }
+    const handleRaw = (raw: string) => {
+        const packet = ___data.get(raw);
+        if (!packet) return;
+        this.#listener.any_listeners.forEach(fn => fn(packet.name, packet.payload, packet));
+        const specifics = this.#listener.named_listeners[packet.name];
+        
+        let a = this.#rclisteners[packet.name];
+        if(a) specifics ? specifics.push(...a) : (this.#listener.named_listeners[packet.name] = a);
+        
+        if (specifics) specifics.forEach(l => l.fn(packet.payload, packet));
+        if(a) this.#rclisteners[packet.name] = [];
+    };
+
+    if (this.isWebSocket) {
+        const ws = c as WebSocket;
+        ws.onmessage = (e) => handleRaw(e.data);
+        ws.onopen = () => emit("open");
+        ws.onerror = (e) => emit("error", e);
+        ws.onclose = () => emit("close");
+    } else {
+        const wt = c as WebTransport;
+        wt.ready.then(() => emit("open")).catch(e => emit("error", e));
+        wt.closed.then(() => emit("close")).catch(e => emit("error", e));
+        this.#wt.readDatagram(wt, handleRaw);
     }
+}
 }
 
 

@@ -97,19 +97,19 @@ export class Bindings {
         }
         return a;
     }
-    async send(name: string, data: string, payloadEncoding: "json" | "u8" = "json") {
+    async send(name: string, data: unknown) {
         if (!this.#c) throw new Slikr.Error("No connection to send data!");
-        data = ___data.create(name, data, payloadEncoding)
+        const packet = ___data.create(name, data);
         if (this.isWebSocket) {
             const ws = this.#c as WebSocket;
             if (ws.readyState !== WebSocket.OPEN) return false;
-            ws.send(data);
+            ws.send(packet);
             return true;
         }
         const wt = this.#c as WebTransport;
         try {
             const writer = wt.datagrams.writable.getWriter();
-            const encodedData = new TextEncoder().encode(data)
+            const encodedData = new TextEncoder().encode(packet)
             await writer.write(encodedData);
             writer.releaseLock();
             return true;
@@ -125,8 +125,9 @@ export class Bindings {
     };
 
     const handleRaw = (raw: string) => {
-        const packet = ___data.get(raw);
+        const packet:any = ___data.get(raw);
         if (!packet) return;
+        packet.timetaken = packet.date - Date.now()
         this.#listener.any_listeners.forEach(fn => fn(packet.name, packet.payload, packet));
         const specifics = this.#listener.named_listeners[packet.name];
         
@@ -156,9 +157,22 @@ export class Bindings {
 
 const ___data = {
     idCounter: 0,
+    _jsonReplacer(_: string, value: unknown) {
+        if (typeof value === "bigint") return value.toString() + "n";
+        return value;
+    },
     _jsonReviver(_: string, value: unknown) {
         if (typeof value === "string" && /^-?\d+n$/.test(value)) return BigInt(value.slice(0, -1));
         return value;
+    },
+    _bytesToBase64(bytes: Uint8Array) {
+        let binary = "";
+        const chunkSize = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+            const chunk = bytes.subarray(i, i + chunkSize);
+            binary += String.fromCharCode(...chunk);
+        }
+        return btoa(binary);
     },
     _base64ToBytes(base64: string) {
         const binary = atob(base64);
@@ -192,13 +206,27 @@ const ___data = {
         }
         return payload;
     },
-    create(name: string, data: string, payloadEncoding: "json" | "u8" = "json") {
+    clientCached: [] as number[],
+    addToClientCached(num:number){
+        if(this.clientCached.length >= 10)this.clientCached.shift()
+        this.clientCached.push(num)
+    },
+    average(arr:number[]){
+        return arr.reduce((a,b)=>a+b,0)/arr.length
+    },
+    create(name: string, data: unknown) {
+        const payloadEncoding: "json" | "u8" = data instanceof Uint8Array ? "u8" : "json";
+        const payloadData = payloadEncoding === "u8"
+            ? this._bytesToBase64(data as Uint8Array)
+            : JSON.stringify(data, this._jsonReplacer);
+this.addToClientCached(performance.now())
         return `FROM_SLIKR|v2
 ${encodeURIComponent(name)}
-${new Date().toISOString()}
+${Date.now()}
 ${++this.idCounter}
 ${payloadEncoding}
-${data}`;
+${this.average(this.clientCached)}
+${payloadData}`;
     },
     get(str: string) {
         if (!str.startsWith("FROM_SLIKR")) return false;
@@ -212,12 +240,13 @@ ${data}`;
 
         const nameRaw = __spl[1];
         const payloadEncoding = isV2 ? (__spl[4] || "raw") : "json";
-        const payloadRaw = isV2 ? __spl.slice(5).join("\n") : __spl.slice(4).join("\n");
+        const payloadRaw = isV2 ? __spl.slice(6).join("\n") : __spl.slice(4).join("\n");
         const data = {
             version,
             name: isV2 ? this._decodeName(nameRaw) : nameRaw,
-            date: __spl[2],
+            date: Number(__spl[2]),
             id: __spl[3],
+            
             payloadEncoding,
             payload: this._decodePayload(payloadRaw, payloadEncoding)
         };

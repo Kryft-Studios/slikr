@@ -281,14 +281,7 @@ export class Slikr {
      * @returns The current `Slikr` instance for chaining.
      */
     async send(name: string, data: any) {
-        if (data instanceof Uint8Array) {
-            await this.#bindings.send(name, ___utils.bytesToBase64(data), "u8");
-            return this;
-        }
-        const payload = JSON.stringify(data, (_, value) =>
-            typeof value === 'bigint' ? value.toString() + 'n' : value
-        ); 
-        await this.#bindings.send(name, payload, "json");
+        await this.#bindings.send(name, data);
         return this
     }
 
@@ -343,17 +336,5 @@ export namespace Slikr {
             super(message)
             this.name = "Slikr"
         }
-    }
-}
-
-const ___utils = {
-    bytesToBase64(bytes: Uint8Array) {
-        let binary = "";
-        const chunkSize = 0x8000;
-        for (let i = 0; i < bytes.length; i += chunkSize) {
-            const chunk = bytes.subarray(i, i + chunkSize);
-            binary += String.fromCharCode(...chunk);
-        }
-        return btoa(binary);
     }
 }

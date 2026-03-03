@@ -97,9 +97,9 @@ export class Bindings {
         }
         return a;
     }
-    async send(name: string, data: string) {
+    async send(name: string, data: string, payloadEncoding: "json" | "u8" = "json") {
         if (!this.#c) throw new Slikr.Error("No connection to send data!");
-        data = ___data.create(name, data)
+        data = ___data.create(name, data, payloadEncoding)
         if (this.isWebSocket) {
             const ws = this.#c as WebSocket;
             if (ws.readyState !== WebSocket.OPEN) return false;
@@ -156,8 +156,49 @@ export class Bindings {
 
 const ___data = {
     idCounter: 0,
-    create(name: string, data: string) {
-        return `FROM_SLIKR|v1\n${name}\n${new Date().toISOString()}\n${++this.idCounter}\n${data}`;
+    _jsonReviver(_: string, value: unknown) {
+        if (typeof value === "string" && /^-?\d+n$/.test(value)) return BigInt(value.slice(0, -1));
+        return value;
+    },
+    _base64ToBytes(base64: string) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes;
+    },
+    _decodeName(name: string) {
+        try {
+            return decodeURIComponent(name);
+        } catch {
+            return name;
+        }
+    },
+    _decodePayload(payload: string, encoding: string = "raw") {
+        if (encoding === "u8") {
+            try {
+                return this._base64ToBytes(payload);
+            } catch {
+                return payload;
+            }
+        }
+        if (encoding === "json") {
+            try {
+                return JSON.parse(payload, this._jsonReviver);
+            } catch {
+                return payload;
+            }
+        }
+        return payload;
+    },
+    create(name: string, data: string, payloadEncoding: "json" | "u8" = "json") {
+        return `FROM_SLIKR|v2
+${encodeURIComponent(name)}
+${new Date().toISOString()}
+${++this.idCounter}
+${payloadEncoding}
+${data}`;
     },
     get(str: string) {
         if (!str.startsWith("FROM_SLIKR")) return false;
@@ -165,12 +206,20 @@ const ___data = {
         const __spl = str.split("\n");
         if (__spl.length < 5) return false;
 
+        const version = __spl[0].split("|")[1] || "v1";
+        const isV2 = version === "v2";
+        if (isV2 && __spl.length < 6) return false;
+
+        const nameRaw = __spl[1];
+        const payloadEncoding = isV2 ? (__spl[4] || "raw") : "json";
+        const payloadRaw = isV2 ? __spl.slice(5).join("\n") : __spl.slice(4).join("\n");
         const data = {
-            version: __spl[0].split("|")[1] || "v1",
-            name: __spl[1],
+            version,
+            name: isV2 ? this._decodeName(nameRaw) : nameRaw,
             date: __spl[2],
             id: __spl[3],
-            payload: __spl.slice(4).join("\n")
+            payloadEncoding,
+            payload: this._decodePayload(payloadRaw, payloadEncoding)
         };
         if (!data.name || !data.date) return false;
 

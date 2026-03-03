@@ -9,6 +9,9 @@
 		"email": "KryftStudios@outlook.com",
 		"url": "https://github.com/Kryft-Studios"
 	},
+	"publishConfig": {
+		"access": "public"
+	},
 	"scripts": {
 		"build": "tsc",
 		"prepublishOnly": "pnpm build"

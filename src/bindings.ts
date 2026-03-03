@@ -6,7 +6,8 @@ interface SlikrEvListener {
 export class Bindings {
     #type: "s" | "t";
     #c?: WebSocket | WebTransport;
-    #u?: string
+    #u?: string;
+    #rclisteners: [] = []
     get url() {
         return this.#u || ""
     }

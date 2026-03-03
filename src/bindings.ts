@@ -1,4 +1,4 @@
-import { Slikr } from "./index";
+import { Slikr } from "./index.js";
 interface SlikrEvListener {
     name: string,
     fn: Function

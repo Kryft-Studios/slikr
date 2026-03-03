@@ -3,12 +3,24 @@
 		"typescript": "^5.9.3"
 	},
 	"name":"@briklab/slikr",
-	"version": "0.5.0",
+	"version": "1.0.0",
 	"author": {
 		"name": "Kryft Studios",
 		"email": "KryftStudios@outlook.com",
 		"url": "https://github.com/Kryft-Studios"
 	},
+	"scripts": {
+		"build": "tsc",
+		"prepublishOnly": "pnpm build"
+	},
 	"license":"Apache-2.0",
-	"readme": "README.md"
+	"readme": "README.md",
+	"exports": {
+		".":{
+			"types": "./dist/index.d.ts",
+			"import":"./dist/index.js",
+			"default": "./dist/index.js",
+			"require":"./dist/index.js"
+		}
+	}
 }

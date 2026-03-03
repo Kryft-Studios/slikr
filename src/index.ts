@@ -1,4 +1,4 @@
-import { Bindings } from "./bindings"
+import { Bindings } from "./bindings.js"
 
 export class Slikr {
     #url: string;
@@ -22,8 +22,8 @@ export class Slikr {
 
         run();
     }
-    keepalive(boolean: boolean): void;
-    keepalive(time: number): void;
+    keepalive(boolean: boolean): this;
+    keepalive(time: number): this;
     keepalive(arg1: number | boolean) {
         if (typeof arg1 === "boolean") {
             this.#keepAlive = arg1
@@ -98,13 +98,14 @@ export class Slikr {
         let isTotalTimeout = false;
         let hasCompleted = false;
         const totalTimeoutPromise = totalTimeoutTime
-            ? new Promise((_, reject) => {setTimeout(() => {
-                isTotalTimeout = true;
-                if (options?.timeout?.onTimeout) options.timeout.onTimeout();
-                else if (this.#connectPredefData?.onTotalTimeout) this.#connectPredefData.onTotalTimeout();
-                reject(new Slikr.Error("Total Connection Timeout"));
-            }, totalTimeoutTime)
-        })
+            ? new Promise((_, reject) => {
+                setTimeout(() => {
+                    isTotalTimeout = true;
+                    if (options?.timeout?.onTimeout) options.timeout.onTimeout();
+                    else if (this.#connectPredefData?.onTotalTimeout) this.#connectPredefData.onTotalTimeout();
+                    reject(new Slikr.Error("Total Connection Timeout"));
+                }, totalTimeoutTime)
+            })
             : null;
 
         const attemptConnection = async () => {
@@ -117,7 +118,7 @@ export class Slikr {
                         this.#connect(i > 0 ? `Retry ${i}` : ""),
                         new Promise((_, reject) => setTimeout(() => reject("retry_timeout"), retryTimeoutTime))
                     ]);
-                    this.#ka()                    
+                    this.#ka()
                     return this;
                 } catch (e) {
                     if (isTotalTimeout) throw e;
@@ -160,9 +161,9 @@ export class Slikr {
     }
     listen = this.on
     async send(name: string, data: any) {
-const payload = JSON.stringify(data, (_, value) => 
-        typeof value === 'bigint' ? value.toString() + 'n' : value
-    );        await this.#bindings.send(name, payload);
+        const payload = JSON.stringify(data, (_, value) =>
+            typeof value === 'bigint' ? value.toString() + 'n' : value
+        ); await this.#bindings.send(name, payload);
         return this
     }
 

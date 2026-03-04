@@ -127,7 +127,7 @@ export class Bindings {
     const handleRaw = (raw: string) => {
         const packet:any = ___data.get(raw);
         if (!packet) return;
-        packet.timetaken = packet.date - Date.now()
+        packet.timetaken = Date.now() - packet.date;
         this.#listener.any_listeners.forEach(fn => fn(packet.name, packet.payload, packet));
         const specifics = this.#listener.named_listeners[packet.name];
         
@@ -246,7 +246,7 @@ ${payloadData}`;
             name: isV2 ? this._decodeName(nameRaw) : nameRaw,
             date: Number(__spl[2]),
             id: __spl[3],
-            
+            clientAveragePerformance:Number(__spl[5]),
             payloadEncoding,
             payload: this._decodePayload(payloadRaw, payloadEncoding)
         };

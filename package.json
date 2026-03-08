@@ -3,7 +3,7 @@
 		"typescript": "^5.9.3"
 	},
 	"name":"@briklab/slikr",
-	"version": "1.2.2",
+	"version": "1.2.3",
 	"author": {
 		"name": "Kryft Studios",
 		"email": "KryftStudios@outlook.com",

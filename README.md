@@ -29,13 +29,13 @@ await client.send("hello", "world");
 
 ### Exported:
 #### Functions:
-- [slikr](https://briklab-docs.pages.dev/packages/silkr/functions/slikr.md)
+- [slikr](https://briklab-docs.pages.dev/packages/silkr/functions/slikr)
 
 #### Classes:
-- [Slikr](https://briklab-docs.pages.dev/packages/silkr/classes/slikr.md)
+- [Slikr](https://briklab-docs.pages.dev/packages/silkr/classes/slikr)
 
 #### Namespaces:
-- [Slikr](https://briklab-docs.pages.dev/packages/silkr/namespaces/slikr.md)
+- [Slikr](https://briklab-docs.pages.dev/packages/silkr/namespaces/slikr)
 
 
 ## Tutorials

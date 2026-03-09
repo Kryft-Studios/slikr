@@ -136,10 +136,14 @@ export class Bindings {
   async closed() {
     if (!this.#c) return false;
     if (this.isWebSocket) {
-      if(((this.#c) as WebSocket).readyState === WebSocket.CLOSED) {
+      if ((this.#c as WebSocket).readyState === WebSocket.CLOSED) {
         return true;
       }
-      return (this.#c as WebSocket).close()};
+      return new Promise((res) => {
+        const ws = this.#c as WebSocket;
+        ws.addEventListener("close", () => res(true), { once: true });
+      });
+    }
     let a;
     try {
       a = await (this.#c as WebTransport).closed;

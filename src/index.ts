@@ -14,7 +14,7 @@ export class Slikr {
   async #ka() {
     const run = async () => {
       if (!this.#keepAlive) return;
-      
+
       try {
         await this.send("keepalive", "Hello!");
       } catch (e) {
@@ -394,7 +394,7 @@ export class Slikr {
  * **`slikr`** is a WebTransport(with WebSocket fallback) Wrapper
  */
 function slikr(url: string, t?: slikr.WebTransport | slikr.WebSocket) {
-  return new Slikr(url);
+  return new Slikr(url,t);
 }
 namespace slikr {
   export type WebTransport = "WebTransport";

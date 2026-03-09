@@ -5,7 +5,6 @@ export class Slikr {
   #bindings: Bindings;
   #keepAlive: boolean = true;
   #katime: number = 5000;
-  #kadata: { [key: string]: unknown } = {};
   /**
    * Starts an internal keepalive loop that periodically sends heartbeat packets.
    * The loop continues until keepalive is disabled.
@@ -15,7 +14,7 @@ export class Slikr {
   async #ka() {
     const run = async () => {
       if (!this.#keepAlive) return;
-
+      
       try {
         await this.send("keepalive", "Hello!");
       } catch (e) {
@@ -58,14 +57,25 @@ export class Slikr {
    * Creates a new `Slikr` client bound to the given endpoint URL.
    *
    * @param url Target WebSocket/WebTransport URL.
+   *
+   * @param t Type of transportation: WT or WS
    */
-  constructor(url: string) {
+  constructor(url: string, t?: slikr.WebTransport | slikr.WebSocket) {
+    // slikr.WebTransport === "t"
+    // slikr.WebSocket === "s"
     this.#url = url;
     const isSupported =
-      typeof WebTransport !== "undefined" &&
-      "datagrams" in WebTransport.prototype &&
-      "ready" in WebTransport.prototype;
-    this.#bindings = new Bindings(isSupported ? "t" : "s");
+      typeof WebTransport !== "undefined" && // check if WebTransport is defined
+      "datagrams" in WebTransport.prototype && // check if there is "datagrams" in WebTransport
+      "ready" in WebTransport.prototype; // check if there is the ready event in WebTransport
+
+    if (!isSupported && t === slikr.WebTransport)
+      console.log(
+        "[Slikr] 'WebTransport' is not supported but is passed. This may cause problems",
+      );
+    this.#bindings = new Bindings(
+      isSupported || t === slikr.WebTransport ? "t" : "s",
+    );
   }
   /**
    * Performs a single low-level connection attempt and waits for transport readiness.
@@ -77,7 +87,7 @@ export class Slikr {
     console.log(
       `[Slikr] Connecting to ${this.#url}...${retrylabel ? `[${retrylabel}]` : ""}`,
     );
-    const conn = this.#bindings.createConnection(this.#url);
+    this.#bindings.createConnection(this.#url);
     return await this.#bindings.ready();
   }
   #connectPredefData: {
@@ -174,72 +184,104 @@ export class Slikr {
   /**
    * connect to the specified url
    */
-  async connect(options?: {
-    retry?: {
-      number?: number;
-      delay?: { number?: number; increaseFn?: (c: number) => number };
-      onRetry?: (n: number) => any;
-      timeout?: { time?: number; onTimeout?: (n: number) => any };
-    };
-    timeout?: { time?: number; onTimeout?: Function };
-  }) {
+  async connect(options?: Slikr.ConnectArgs|slikr.ConnectArgs) {
+    const dateStartedAt = Date.now();
     const maxRetries =
-      options?.retry?.number ?? this.#connectPredefData?.retryNum ?? 0;
+      options?.retry?.number ?? // if given in options
+      this.#connectPredefData?.retryNum ?? // if chained
+      0; // fallback
+
+    const onRetryTO =
+      options?.retry?.timeout?.onTimeout ?? // if given in options
+      this.#connectPredefData?.onRetryTimeout; // if chained
+
+    const onRet = options?.retry?.onRetry ?? this.#connectPredefData?.onRetry; // if given in options // if chained
+
+    const incFn =
+      options?.retry?.delay?.increaseFn ??
+      this.#connectPredefData?.retryDelayIncreaseFn;
+
     let currentDelay =
-      options?.retry?.delay?.number ??
-      this.#connectPredefData?.retryDelay ??
-      1000;
+      options?.retry?.delay?.number ?? // if given in options
+      this.#connectPredefData?.retryDelay ?? // if chained
+      1000; // fallnack
+
     const totalTimeoutTime =
-      options?.timeout?.time ?? this.#connectPredefData?.totalTimeout;
-    let isTotalTimeout = false;
-    let hasCompleted = false;
+      options?.timeout?.time ?? this.#connectPredefData?.totalTimeout; // if given in options // if chained
+    // Infinite timeout time if not given
+    let totalTimeoutDate: number | undefined;
+    if (totalTimeoutTime) {
+      totalTimeoutDate = dateStartedAt + totalTimeoutTime;
+    }
+
+    const retryTimeoutTime =
+      options?.retry?.timeout?.time ?? // if given in options
+      this.#connectPredefData?.retryTimeout ?? // if chained
+      5000; // fallback
+
+    let isTotalTimeout = false; //  Flag if there is a total timeout
     const totalTimeoutPromise = totalTimeoutTime
       ? new Promise((_, reject) => {
           setTimeout(() => {
-            isTotalTimeout = true;
-            if (options?.timeout?.onTimeout) options.timeout.onTimeout();
+            isTotalTimeout = true; // set total timeout to true
+            if (options?.timeout?.onTimeout)
+              options.timeout.onTimeout(); // run the onTimeout function if there is any
             else if (this.#connectPredefData?.onTotalTimeout)
-              this.#connectPredefData.onTotalTimeout();
-            reject(new Slikr.Error("Total Connection Timeout"));
+              this.#connectPredefData.onTotalTimeout(); // else run the chained function
+            reject(new Slikr.Error("Total Connection Timeout")); // throw error
           }, totalTimeoutTime);
         })
       : null;
 
     const attemptConnection = async () => {
       for (let i = 0; i <= maxRetries; i++) {
-        if (isTotalTimeout) break;
+        if (isTotalTimeout) break; // break the loop if there is a totalTimeout now
+        const timeoutDate = totalTimeoutDate; // Shadowing for closure safety
 
+        let retryTimer: any;
+        let totalTimer: any;
+
+        // 1. Explicitly type the array as Promise<any>[]
+        const raceStatement: Promise<any>[] = [
+          this.#connect(i > 0 ? `Retry ${i}` : ""),
+          new Promise((_, reject) => {
+            retryTimer = setTimeout(
+              () => reject("retry_timeout"),
+              retryTimeoutTime,
+            );
+          }),
+        ];
+
+        // 2. Narrow the type BEFORE the push
+        if (typeof timeoutDate === "number") {
+          raceStatement.push(
+            new Promise((_, reject) => {
+              const remaining = Math.max(0, timeoutDate - Date.now());
+              totalTimer = setTimeout(() => reject("total_timeout"), remaining);
+            }),
+          );
+        }
         try {
-          const retryTimeoutTime =
-            options?.retry?.timeout?.time ??
-            this.#connectPredefData?.retryTimeout ??
-            5000;
-          await Promise.race([
-            this.#connect(i > 0 ? `Retry ${i}` : ""),
-            new Promise((_, reject) =>
-              setTimeout(() => reject("retry_timeout"), retryTimeoutTime),
-            ),
-          ]);
-          this.#ka();
-          return this;
+          if (i > 0) await this.#bindings.abort?.(); // abort previous attempt
+
+          await Promise.race(raceStatement);
+          clearTimeout(retryTimer); // clear the retry timer
+          clearTimeout(totalTimer); // clear the total timer
+
+          this.#ka(); // start the keep alive loop
+          console.log("[Slikr] Connection Successful!"); // inform
+          return this; // return
         } catch (e) {
-          if (isTotalTimeout) throw e;
-          if (e === "retry_timeout") {
-            const onRetryTO =
-              options?.retry?.timeout?.onTimeout ??
-              this.#connectPredefData?.onRetryTimeout;
-            if (onRetryTO) onRetryTO(i);
-          }
-          const onRet =
-            options?.retry?.onRetry ?? this.#connectPredefData?.onRetry;
-          if (onRet) onRet(i);
+          clearTimeout(retryTimer); // clear the retry timer
+          clearTimeout(totalTimer); // clear the total timer
+          if (isTotalTimeout || e === "total_timeout") throw e; // if there is a total timeout then return
+          if (e === "retry_timeout" && onRetryTO) onRetryTO(i);
+          onRet?.(i); // run the onRetry function if it is there
 
           if (i === maxRetries) throw new Slikr.Error("Max retries reached.");
-          const incFn =
-            options?.retry?.delay?.increaseFn ??
-            this.#connectPredefData?.retryDelayIncreaseFn;
-          currentDelay = incFn ? incFn(currentDelay) : currentDelay;
-          await new Promise((res) => setTimeout(res, currentDelay));
+
+          currentDelay = incFn ? incFn(currentDelay) : currentDelay; // increase delay using delayincreasefn or keep the same delay
+          await new Promise((res) => setTimeout(res, currentDelay)); // await delay
         }
       }
     };
@@ -257,7 +299,7 @@ export class Slikr {
    * @returns The current `Slikr` instance for chaining.
    */
   /**
-   * There is 4 special event: "any","close","on","open". Please don't use it normally.
+   * There is 4 special event: "any","close","error","open". Please don't use it normally.
    *
    * If you want to use the "any" event but dont want to type the first parameter, pass the first parameter as a callback
    */
@@ -278,13 +320,12 @@ export class Slikr {
    * @throws {Slikr.Error} When arguments are invalid.
    */
   on(arg1: string | Function, arg2?: Function): Slikr {
-    if (typeof arg1 === "string" && arg2) {
-      this.#bindings.listen(arg1, arg2);
-    } else if (typeof arg1 === "function") {
-      this.#bindings.listen("any", arg1);
-    } else {
-      throw new Slikr.Error("Invalid 'on' arguments!");
-    }
+    // overload 1
+    if (typeof arg1 === "string" && arg2) this.#bindings.listen(arg1, arg2);
+    // overload 2
+    else if (typeof arg1 === "function") this.#bindings.listen("any", arg1);
+    // no match
+    else throw new Slikr.Error("Invalid 'on' arguments!");
     return this;
   }
   /**
@@ -338,25 +379,57 @@ export class Slikr {
     if (timeout > 0) {
       return Promise.race([
         this.#bindings.receive(name),
-        new Promise((_, reject) =>
+        new Promise((_, reject) => {
           setTimeout(
             () => reject(new Slikr.Error(`Receive timeout for: ${name}`)),
             timeout,
-          ),
-        ),
+          );
+        }),
       ]);
     }
     return await this.#bindings.receive(name);
   }
 }
-export default function slikr(url: string) {
+/**
+ * **`slikr`** is a WebTransport(with WebSocket fallback) Wrapper
+ */
+function slikr(url: string, t?: slikr.WebTransport | slikr.WebSocket) {
   return new Slikr(url);
 }
+namespace slikr {
+  export type WebTransport = "WebTransport";
+  export type WebSocket = "WebSocket";
+  export const WebTransport = "WebTransport";
+  export const WebSocket = "WebSocket";
+  export interface ConnectArgs {
+    retry?: {
+      number?: number;
+      delay?: { number?: number; increaseFn?: (c: number) => number };
+      onRetry?: (n: number) => any;
+      timeout?: { time?: number; onTimeout?: (n: number) => any };
+    };
+    timeout?: { time?: number; onTimeout?: Function };
+  }
+}
+export default slikr;
 export namespace Slikr {
   export class Error extends globalThis.Error {
     constructor(message: any) {
       super(message);
       this.name = "Slikr";
     }
+  }
+  export type WebTransport = "WebTransport";
+  export type WebSocket = "WebSocket";
+  export const WebTransport = "WebTransport";
+  export const WebSocket = "WebSocket";
+  export interface ConnectArgs {
+    retry?: {
+      number?: number;
+      delay?: { number?: number; increaseFn?: (c: number) => number };
+      onRetry?: (n: number) => any;
+      timeout?: { time?: number; onTimeout?: (n: number) => any };
+    };
+    timeout?: { time?: number; onTimeout?: Function };
   }
 }

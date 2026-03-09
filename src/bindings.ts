@@ -28,6 +28,31 @@ export class Bindings {
   get textdecoder() {
     return this.#textdecoder;
   }
+
+  async abort() {
+    if (!this.#c) return;
+
+    try {
+      if (this.isWebSocket) {
+        const ws = this.#c as WebSocket;
+        // Close immediately and remove listeners to prevent them from firing
+        for(const i of ["onmessage","onopen","onerror","onclose"]){
+          (ws as any)[i] = null;
+        }
+        ws.close();
+      } else {
+        const wt = this.#c as WebTransport;
+        // WebTransport needs to be closed explicitly
+        await wt.close();
+      }
+    } catch (e) {
+      // Silently handle if it's already closed
+    } finally {
+      // Crucial: Clear the reference so createConnection() can make a new one
+      this.#c = undefined;
+      this.#u = undefined;
+    }
+  }
   #wt = {
     textdecoder: this.textdecoder,
     async readDatagram(wt: WebTransport, handler: Function) {
@@ -72,36 +97,49 @@ export class Bindings {
   listen(name: string, callback: Function) {
     this.#listener.add(name, callback);
   }
-  listenAny(callback: Function) {
-    this.#listener.add("any", callback);
-  }
   get isWebSocket() {
     return this.#type === "s";
   }
-
   async ready() {
     if (!this.#c) return false;
+
     if (this.isWebSocket) {
-        const ws = this.#c as WebSocket;
-        if (ws.readyState === WebSocket.OPEN) return true;
-        
-        return new Promise((resolve) => {
-            ws.addEventListener('open', () => resolve(true), { once: true });
-            ws.addEventListener('error', () => resolve(false), { once: true });
-        });
+      const ws = this.#c as WebSocket;
+      if (ws.readyState === WebSocket.OPEN) return true;
+
+      return new Promise((resolve) => {
+        const onOpen = () => {
+          cleanup();
+          resolve(true);
+        };
+        const onError = () => {
+          cleanup();
+          resolve(false);
+        };
+        const cleanup = () => {
+          ws.removeEventListener("open", onOpen);
+          ws.removeEventListener("error", onError);
+        };
+
+        ws.addEventListener("open", onOpen, { once: true });
+        ws.addEventListener("error", onError, { once: true });
+      });
     }
-    let a;
+
     try {
-      a = await (this.#c as WebTransport).ready;
+      await (this.#c as WebTransport).ready;
+      return true;
     } catch (e) {
-      throw new Slikr.Error(`WebTransport.ready failed with error ${e}`);
       return false;
     }
-    return a;
   }
   async closed() {
     if (!this.#c) return false;
-    if (this.isWebSocket) return (this.#c as WebSocket).close();
+    if (this.isWebSocket) {
+      if(((this.#c) as WebSocket).readyState === WebSocket.CLOSED) {
+        return true;
+      }
+      return (this.#c as WebSocket).close()};
     let a;
     try {
       a = await (this.#c as WebTransport).closed;
@@ -114,7 +152,7 @@ export class Bindings {
 
   async send(name: string, data: unknown) {
     if (!this.#c) throw new Slikr.Error("No connection to send data!");
-    const packet = ___data.create(name, data);
+    const packet = DataTools.create(name, data);
     if (this.isWebSocket) {
       const ws = this.#c as WebSocket;
       if (ws.readyState !== WebSocket.OPEN) return false;
@@ -140,7 +178,7 @@ export class Bindings {
     };
 
     const handleRaw = (raw: string) => {
-      const packet: any = ___data.get(raw);
+      const packet: any = DataTools.get(raw);
       if (!packet) return;
       packet.timetaken = Date.now() - packet.date;
       this.#listener.any_listeners.forEach((fn) =>
@@ -172,7 +210,7 @@ export class Bindings {
   }
 }
 
-const ___data = {
+const DataTools = {
   idCounter: 0,
   _jsonReplacer(_: string, value: unknown) {
     if (typeof value === "bigint") return value.toString() + "n";
@@ -232,9 +270,10 @@ const ___data = {
   average(arr: number[]) {
     return arr.reduce((a, b) => a + b, 0) / arr.length;
   },
-  create(name:string, data:any) {
+  create(name: string, data: any) {
     const payloadEncoding = data instanceof Uint8Array ? "u8" : "json";
-    const payloadData = payloadEncoding === "u8"
+    const payloadData =
+      payloadEncoding === "u8"
         ? this._bytesToBase64(data)
         : JSON.stringify(data, this._jsonReplacer);
 
@@ -251,10 +290,10 @@ ${this.average(this.clientCached)}
 ${payloadData}`;
   },
 
-  get(str:string) {
+  get(str: string) {
     if (!str.startsWith("FROM_SLIKR")) return false;
     const [headerBlock, payloadRaw] = str.split("\n---\n");
-    if (!payloadRaw) return false; 
+    if (!payloadRaw) return false;
 
     const __spl = headerBlock.split("\n");
     const version = __spl[0].split("|")[1] || "v1";
@@ -267,10 +306,10 @@ ${payloadData}`;
       id: __spl[3],
       clientAveragePerformance: Number(__spl[5] || 0),
       payloadEncoding: __spl[4] || "json",
-      payload: this._decodePayload(payloadRaw, __spl[4] || "json")
+      payload: this._decodePayload(payloadRaw, __spl[4] || "json"),
     };
 
     if (!data.name || !data.date) return false;
     return data;
-  }
+  },
 };

@@ -73,8 +73,9 @@ export class Slikr {
       console.log(
         "[Slikr] 'WebTransport' is not supported but is passed. This may cause problems",
       );
+    const shouldUseWebTrans = !t&&isSupported?true:t===slikr.WebTransport?true:false
     this.#bindings = new Bindings(
-      isSupported || t === slikr.WebTransport ? "t" : "s",
+      shouldUseWebTrans ? "t" : "s",
     );
   }
   /**

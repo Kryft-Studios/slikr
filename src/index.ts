@@ -73,7 +73,7 @@ export class Slikr {
       console.log(
         "[Slikr] 'WebTransport' is not supported but is passed. This may cause problems",
       );
-    const shouldUseWebTrans = !t&&isSupported?true:t===slikr.WebTransport?true:false
+    const shouldUseWebTrans = !t && isSupported ? true : t === slikr.WebTransport ? true : false
     this.#bindings = new Bindings(
       shouldUseWebTrans ? "t" : "s",
     );
@@ -185,7 +185,7 @@ export class Slikr {
   /**
    * connect to the specified url
    */
-  async connect(options?: Slikr.ConnectArgs|slikr.ConnectArgs) {
+  async connect(options?: Slikr.ConnectArgs | slikr.ConnectArgs) {
     const dateStartedAt = Date.now();
     const maxRetries =
       options?.retry?.number ?? // if given in options
@@ -223,15 +223,15 @@ export class Slikr {
     let isTotalTimeout = false; //  Flag if there is a total timeout
     const totalTimeoutPromise = totalTimeoutTime
       ? new Promise((_, reject) => {
-          setTimeout(() => {
-            isTotalTimeout = true; // set total timeout to true
-            if (options?.timeout?.onTimeout)
-              options.timeout.onTimeout(); // run the onTimeout function if there is any
-            else if (this.#connectPredefData?.onTotalTimeout)
-              this.#connectPredefData.onTotalTimeout(); // else run the chained function
-            reject(new Slikr.Error("Total Connection Timeout")); // throw error
-          }, totalTimeoutTime);
-        })
+        setTimeout(() => {
+          isTotalTimeout = true; // set total timeout to true
+          if (options?.timeout?.onTimeout)
+            options.timeout.onTimeout(); // run the onTimeout function if there is any
+          else if (this.#connectPredefData?.onTotalTimeout)
+            this.#connectPredefData.onTotalTimeout(); // else run the chained function
+          reject(new Slikr.Error("Total Connection Timeout")); // throw error
+        }, totalTimeoutTime);
+      })
       : null;
 
     const attemptConnection = async () => {
@@ -337,13 +337,23 @@ export class Slikr {
    * Sends a named event with either JSON payload data or binary bytes.
    * BigInt values are stringified with an `n` suffix when JSON is used.
    *
-   * @param name Event name to send.
-   * @param data Payload data to serialize and send.
+   * @param name Event name to send. It cannot begin with `SLIKR_INTERNAL_EVENT`
+   * @param data Payload data to serialize and send. If object, it cannot have the property SLIKR_INTERNAL_EVENT.
    * @returns The current `Slikr` instance for chaining.
    */
   async send(name: string, data: any) {
+    if (name.startsWith("SLIKR_INTERNAL_EVENT")) throw new Slikr.Error("You can not pass SLIKR_INTERNAL_EVENT as a event.")
+    if (typeof data === "object" && typeof data?.SLIKR_INTERNAL_EVENT !== "undefined") throw new Slikr.Error("You can not pass SLIKR_INTERNAL_EVENT as a property in your object.")
     await this.#bindings.send(name, data);
     return this;
+  }
+
+  /**
+ * Access a specific room's API.
+ * Example Usage: client.room("lobby").join()
+ */
+  room(name: string) {
+    return new Slikr.Room(name,this)
   }
 
   /**
@@ -395,7 +405,7 @@ export class Slikr {
  * **`slikr`** is a WebTransport(with WebSocket fallback) Wrapper
  */
 function slikr(url: string, t?: slikr.WebTransport | slikr.WebSocket) {
-  return new Slikr(url,t);
+  return new Slikr(url, t);
 }
 namespace slikr {
   export type WebTransport = "WebTransport";
@@ -432,5 +442,38 @@ export namespace Slikr {
       timeout?: { time?: number; onTimeout?: (n: number) => any };
     };
     timeout?: { time?: number; onTimeout?: Function };
+  }
+  export class Room {
+    #name: string;
+    #parent: Slikr;
+
+    constructor(name: string, parent: Slikr) {
+      this.#name = name;
+      this.#parent = parent;
+    }
+
+    async join(): Promise<this> {
+      await this.#parent.send("SLIKR_INTERNAL_EVENT", { room: this.#name, do: "join" });
+      return this;
+    }
+
+    async leave(): Promise<this> {
+      await this.#parent.send("SLIKR_INTERNAL_EVENT", { room: this.#name, do: "join" });
+      return this;
+    }
+
+    async broadcast(eventName: string, data: any): Promise<this> {
+      await this.#parent.send(eventName, { SLIKR_INTERNAL_EVENT: {_room: this.#name}, ...data });
+      return this;
+    }
+
+    on(eventName: string, callback: Function): this {
+      this.#parent.on(eventName, (payload: any, packet: any) => {
+        if (payload?.SLIKR_INTERNAL_EVENT?._room === this.#name || packet?.SLIKR_INTERNAL_EVENT?._room === this.#name) {
+          callback(payload, packet);
+        }
+      });
+      return this;
+    }
   }
 }

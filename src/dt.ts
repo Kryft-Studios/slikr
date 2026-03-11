@@ -69,7 +69,7 @@ export const DataTools = {
     this.addToClientCached(performance.now());
 
     // Header and Payload separated by ---
-    return `FROM_SLIKR|v2
+    return `FROM_SLIKR|v3
 ${encodeURIComponent(name)}
 ${Date.now()}
 ${++this.idCounter}
